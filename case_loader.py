@@ -72,3 +72,13 @@ class CaseLoader():
         for i in range(len(flat_set[0])):
             return_set.append([flat_set[0][i], TFT.int_to_one_hot(flat_set[1][i], 10)])
         return return_set
+
+    def get_fav_specs(self, case):
+        if case == "mnist":
+            return 2000, 0, [200,100,60,30], 0.005, 100
+        if case == "wine":
+            return 10000, 0, [22, 16, 11], 0.0005, 500
+        if case == "parity":
+            return 5000, 0, [16,8,8,4,4,2], 0.05, 20
+        else:
+            return []

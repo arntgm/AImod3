@@ -66,7 +66,7 @@ def mnist(learning_rate = 0.005):
     for i in range(5000):
         batch_xs, batch_ys = next_batch(train_data, 100)
         sess.run(train_step, feed_dict={x: batch_xs, y_: batch_ys})
-        if (i % 100 == 0):
+        if (i % 50 == 0):
             print ("Step %04d" %i, " accuracy = %g" %sess.run(accuracy, feed_dict={x: x_test, y_: y_test}))
     print ("Accuracy:",sess.run(accuracy, feed_dict = {x: x_test, y_: y_test}))
     sess.close()
