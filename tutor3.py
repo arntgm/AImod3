@@ -11,8 +11,9 @@ import random as r
 
 class Gann():
 
-    def __init__(self, dims, cman,lrate=.1,showint=None,mbs=10,vint=None,softmax=False):
+    def __init__(self, dims, cman, activation_function, lrate=.1,showint=None,mbs=10,vint=None,softmax=False):
         self.learning_rate = lrate
+        self.activation_function = activation_function
         self.layer_sizes = dims # Sizes of each layer of neurons
         self.show_interval = showint # Frequency of showing grabbed variables
         self.global_training_step = 0 # Enables coherent data-storage during extra training runs (see runmore).
@@ -48,9 +49,9 @@ class Gann():
         invar = self.input; insize = num_inputs
         # Build all of the modules
         for i,outsize in enumerate(self.layer_sizes[1:len(self.layer_sizes)-1]):
-            gmod = Gannmodule(self,i,invar,insize,outsize)
+            gmod = Gannmodule(self,i,invar,insize,outsize, self.activation_function)
             invar = gmod.output; insize = gmod.outsize
-        gmod = Gannmodule(self,len(self.layer_sizes)-1,invar,insize,self.layer_sizes[-1],activation_function = None)
+        gmod = Gannmodule(self,len(self.layer_sizes)-1,invar,insize,self.layer_sizes[-1], None)
         self.out_logits = gmod.out_logits
         self.output = gmod.output # Output of last module is output of whole network
         if self.softmax_outputs: self.output = tf.nn.softmax(self.output)
@@ -233,7 +234,7 @@ class Gann():
 # A general ann module = a layer of neurons (the output) plus its incoming weights and biases.
 class Gannmodule():
 
-    def __init__(self,ann,index,invariable,insize,outsize, activation_function = tf.nn.relu):
+    def __init__(self,ann,index,invariable,insize,outsize, activation_function):
         self.ann = ann
         self.insize=insize  # Number of neurons feeding into this module
         self.outsize=outsize # Number of neurons in this module
@@ -310,8 +311,9 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(case, epochs=None,nbits=None, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False):
+def autoex(case, activation_function = tf.nn.relu, epochs=None, nbits=None, num = None, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False):
     CL = case_loader.CaseLoader()
+    epochs, nbits, num, layers, lrate, mbs = get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs)
     
     switcher = {
         "parity": (lambda : CL.parity(nbits)),
@@ -320,14 +322,16 @@ def autoex(case, epochs=None,nbits=None, layers = None, lrate=None,showint=100,m
         "yeast": (lambda : CL.yeast()),
         "phishing": (lambda : CL.phishing()),
         "mnist": (lambda : CL.mnist()),
-        "bitcount": (lambda : TFT.gen_vector_count_cases(5*2**nbits, 2**nbits)),
-        "segmentcount": (lambda : TFT.gen_segmented_vector_cases(2**nbits, 5*2**nbits, 0, nbits)),
+        "bitcount": (lambda : TFT.gen_vector_count_cases(num, nbits)),
+        "segmentcount": (lambda : TFT.gen_segmented_vector_cases(nbits, num, 0, nbits//2+1))
     }
     
     case_generator = switcher.get(case, "nothing")
     cman = Caseman(cfunc=case_generator,vfrac=vfrac,tfrac=tfrac)
-    epochs, nbits, layers, lrate, mbs = get_specs(CL, cman, case, epochs, nbits, layers, lrate, mbs)
-    ann = Gann(dims=layers,cman=cman,lrate=lrate,showint=showint,mbs=mbs,vint=vint,softmax=sm)
+    x_len, y_len = len(cman.get_validation_cases()[0][0]), len(cman.get_validation_cases()[0][1])
+    layers.insert(0, x_len)
+    layers.append(y_len)
+    ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,showint=showint,mbs=mbs,vint=vint,softmax=sm)
 ##    ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
 ##    ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
     #ann.add_grabvar(0,'wgt') # Add a grabvar (to be displayed in its own matplotlib window).
@@ -335,19 +339,24 @@ def autoex(case, epochs=None,nbits=None, layers = None, lrate=None,showint=100,m
     #ann.runmore(epochs*2)
     return ann
 
-def get_specs(CL, cman, case, epochs, nbits, layers, lrate, mbs):
-    epochs_, nbits_, layers_, lrate_, mbs_ = CL.get_fav_specs(case)
-    if (layers == None):
+def get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs):
+    epochs_, nbits_, num_, layers_, lrate_, mbs_ = CL.get_fav_specs(case)
+    if (case == "parity"):
+        layers = []
+        for i in range(4):
+            layers.append(nbits)
+        epochs = epochs_ + 2000*(nbits-10)
+    elif (layers == None):
         layers = layers_
-    layers.insert(0,len(cman.cases[0][0]))
-    layers.append(len(cman.cases[0][1]))
     if (epochs == None):
-        epocs = epochs_
+        epochs = epochs_
     if (nbits == None):
         nbits = nbits_
+    if (num == None):
+        num = num_
     if (lrate == None):
         lrate = lrate_
     if (mbs == None):
         mbs = mbs_
-    return epocs, nbits, layers, lrate, mbs
+    return epochs, nbits, num, layers, lrate, mbs
     
