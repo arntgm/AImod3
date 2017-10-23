@@ -94,8 +94,8 @@ class CaseLoader():
         if case == "yeast":
             return 30000, 0, 0, [100,100,100,100], 0.001, 100
         if case == "wine":
-            return 10000, 0, 0, [50, 100,50, 20,10], 0.005, 500
-        #GOOD på små nbits
+            return 10000, 0, 0, [400,300,200,100,50], 0.001, 100
+        #GOOD, bruk tf.nn.tanh
         if case == "parity":
             return 6000, 0, 0, [10,10,10], 0.005, 500
         #GOOD
@@ -106,5 +106,8 @@ class CaseLoader():
         #GOOD
         if case == "phishing":
             return 5000, 0, 0, [30, 20,15,10,5], 0.005, 100
+        #GOOD
+        if case == "segmentcount":
+            return 5000, 25, 2**12, [150,100,50,25,10], 0.005, 100
         else:
             return []
