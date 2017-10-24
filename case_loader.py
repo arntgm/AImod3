@@ -105,7 +105,7 @@ class CaseLoader():
             return 14000, 0, 0, [20,10,10], 0.005, 100
         #GOOD
         if case == "phishing":
-            return 5000, 0, 0, [30, 20,15,10,5], 0.005, 100
+            return 1000, 0, 0, [30, 20,15,10,5], 0.005, 100 #5000 epochs
         #GOOD
         if case == "segmentcount":
             return 5000, 25, 2**12, [150,100,50,25,10], 0.005, 100

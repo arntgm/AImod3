@@ -188,6 +188,19 @@ class Gann():
             else:
                 print(v, end="\n\n")
 
+    def display_mapvars(self, grabbed_vals, grabbed_vars,case=1):
+        names = [x.name for x in grabbed_vars];
+        ##msg = "Output Values for Case " + str(case)
+        #print("\n" + msg, end="\n")
+        fig_index = 0
+        for i, v in enumerate(grabbed_vals):
+            if names: print("   " + names[i] + " = ", end="\n")
+            if type(v) == np.ndarray and len(v.shape) > 1: # If v is a matrix, use hinton plotting
+                TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= 'layer ' +names[i]+ ' for case '+ str(case))
+                fig_index += 1
+            else:
+                print(v, end="\n\n")
+
     def run(self,epochs=100,sess=None,continued=False):
         PLT.ion()
         self.training_session(epochs,sess=sess,continued=continued)
@@ -318,7 +331,7 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(case, activation_function = tf.nn.relu, mapping=False, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False, keeps = 1.0):
+def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, grabvars=None, dendrograms=None, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False, keeps = 1.0):
     CL = case_loader.CaseLoader()
     epochs, nbits, num, layers, lrate, mbs = get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs)
     
@@ -341,23 +354,36 @@ def autoex(case, activation_function = tf.nn.relu, mapping=False, epochs=None, n
     ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,showint=showint,mbs=mbs,vint=vint,softmax=sm, keeps=keeps)
     ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
     ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
+
+    if grabvars:
+        for i in range(len(grabvars)):
+            ann.add_grabvar(grabvars[i])
     ann.run(epochs)
     #ann.test_on_trains(ann.current_session)
     #ann.do_testing(ann.current_session,cman.get_testing_cases(),'Final Testing')
-    if mapping:
-        do_mapping(cases=cman.get_training_cases(), ann=ann)
+    if mapvars:
+        do_mapping(mapvars,cases=cman.get_training_cases()[:mapcases+1], ann=ann)
+    if dendrograms:
+        pass
     #ann.runmore(epochs*2)
     return ann
 
-def do_mapping(cases=None, ann=None):
-    for i in range(len(ann.modules)): # Add all grabvars (to be displayed in its own matplotlib window).
-        ann.add_grabvar(i,'wgt')
+def do_mapping(mapvars, cases=None, ann=None):
+    for i in mapvars: # Add all mapvars (to be displayed in own matplotlib window).
+        if i==0:
+            ann.add_grabvar(i, 'in')
+        ann.add_grabvar(i,'out')
+    print(ann.grabvars)
     ann.reopen_current_session()
-
-    inputs = [c[0] for c in cases]; targets = [c[1] for c in cases]
-    feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
-    
-    ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
+    index = 1
+    for case in cases:
+        inputs = [case[0]]; targets = [case[1]]
+        feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+        results = ann.current_session.run(ann.grabvars, feed_dict=feeder)
+        #for i in range(len(ann.grabvars)):
+        ann.display_mapvars(results, ann.grabvars, case=index)
+        index+=1
+    #ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
      
 
 def get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs):
