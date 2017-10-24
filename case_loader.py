@@ -97,7 +97,10 @@ class CaseLoader():
             return 10000, 0, 0, [400,200], 0.005, 100
         #GOOD, bruk tf.nn.tanh
         if case == "parity":
-            return 6000, 0, 0, [10,10,10], 0.005, 500
+            #return 6000, 0, 0, [10,10,10], 0.005, 500
+            return 6000, 0, 0, [40], 0.005, 500
+        if case == "autoencoder":
+            return 1500, 0, 0, [3], 0.005, 200
         #GOOD
         if case == "bitcount":
             return 3000, 16, 2**12, [32], 0.005, 100

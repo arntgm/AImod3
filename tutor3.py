@@ -333,7 +333,10 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None, dendrocases=10, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0):
+def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None,
+           dendrocases=10, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None,
+           lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0):
+    
     CL = case_loader.CaseLoader()
     epochs, nbits, num, layers, lrate, mbs = get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs)
     
@@ -345,7 +348,8 @@ def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, bia
         "phishing": (lambda : CL.phishing()),
         "mnist": (lambda : CL.mnist()),
         "bitcount": (lambda : TFT.gen_vector_count_cases(num, nbits)),
-        "segmentcount": (lambda : TFT.gen_segmented_vector_cases(nbits, num, minbit, maxbit))
+        "segmentcount": (lambda : TFT.gen_segmented_vector_cases(nbits, num, minbit, maxbit)),
+        "autoencoder": (lambda : TFT.gen_all_one_hot_cases(8))
     }
     
     case_generator = switcher.get(case, "nothing")
@@ -353,7 +357,8 @@ def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, bia
     x_len, y_len = len(cman.get_validation_cases()[0][0]), len(cman.get_validation_cases()[0][1])
     layers.insert(0, x_len)
     layers.append(y_len)
-    ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,showint=showint,mbs=mbs,vint=vint,activation_out=activation_out, keeps=keeps)
+    ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,
+               showint=showint,mbs=mbs,vint=vint,activation_out=activation_out, keeps=keeps)
 
     #ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
     #ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
@@ -407,29 +412,36 @@ def do_mapping(mapvars, cases=None, ann=None):
         if i==0:
             ann.add_grabvar(i, 'in')
         ann.add_grabvar(i,'out')
+        if i==len(mapvars)-1:
+            ann.add_grabvar(len(ann.modules)-1, 'out')
+        
     ann.reopen_current_session()
     index = 1
-    for var in ann.grabvars:
-        results = []
-        for case in cases:
-            inputs = [case[0]]; targets = [case[1]]
-            feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
-            results.append(ann.current_session.run(var, feed_dict=feeder))
-            #for i in range(len(ann.grabvars)):
-        #ann.display_mapvars(results, var, case=index)
+    inputs = [c[0] for c in cases]; targets = [c[1] for c in cases]
+    feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+    results = (ann.current_session.run(ann.grabvars, feed_dict=feeder))
+    print(results)
+    index=1
+    for res in results:
+        title = "layer "+str(index)
         index+=1
-        #ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
-        TFT.hinton_plot_multi(results)
+        TFT.hinton_plot(res, title=title)
+##    for var in ann.grabvars:
+##        results = []
+##        for case in cases:
+##            inputs = [case[0]]; targets = [case[1]]
+##            feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+##            results.append(ann.current_session.run(var, feed_dict=feeder))
+##            #for i in range(len(ann.grabvars)):
+##        #ann.display_mapvars(results, var, case=index)
+##        index+=1
+##        #ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
+##        TFT.hinton_plot_multi(results)
      
 
 def get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs):
     epochs_, nbits_, num_, layers_, lrate_, mbs_ = CL.get_fav_specs(case)
-    if (case == "parity"):
-        layers = []
-        for i in range(4):
-            layers.append(nbits)
-        epochs = epochs_ + 2000*(nbits-10)
-    elif (layers == None):
+    if (layers == None):
         layers = layers_
     if (epochs == None):
         epochs = epochs_
