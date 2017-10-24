@@ -11,7 +11,7 @@ import random as r
 
 class Gann():
 
-    def __init__(self, dims, cman, activation_function, lrate=.1,showint=None,mbs=10,vint=None,softmax=False, keeps = 1.0):
+    def __init__(self, dims, cman, activation_function, activation_out=tf.nn.softmax, lrate=.1,showint=None,mbs=10,vint=None,softmax=False, keeps = 1.0):
         self.learning_rate = lrate
         self.activation_function = activation_function
         self.layer_sizes = dims # Sizes of each layer of neurons
@@ -24,7 +24,7 @@ class Gann():
         self.validation_history = []
         self.keeps = keeps
         self.caseman = cman
-        self.softmax_outputs = softmax
+        self.activation_output = activation_out
         self.modules = []
         self.build()
 
@@ -56,7 +56,8 @@ class Gann():
         gmod = Gannmodule(self,len(self.layer_sizes)-1,invar,insize,self.layer_sizes[-1], None, self.keeps)
         self.out_logits = gmod.out_logits
         self.output = gmod.output # Output of last module is output of whole network
-        if self.softmax_outputs: self.output = tf.nn.softmax(self.output)
+        #if self.softmax_outputs: self.output = tf.nn.softmax(self.output)
+        self.output = self.activation_output(self.output)
         self.target = tf.placeholder(tf.float64,shape=(None,gmod.outsize),name='Target')
         self.configure_learning()
 
@@ -172,18 +173,19 @@ class Gann():
         else:
             results = sess.run([operators, grabbed_vars], feed_dict=feed_dict)
         if show_interval and (step % show_interval == 0):
-            self.display_grabvars(results[1], grabbed_vars, step=step)
+            #self.display_grabvars(results[1], grabbed_vars, step=step)
+            pass
         return results[0], results[1], sess
 
-    def display_grabvars(self, grabbed_vals, grabbed_vars,step=1):
+    def display_grabvars(self, grabbed_vals, grabbed_vars):
         names = [x.name for x in grabbed_vars];
-        msg = "Grabbed Variables at Step " + str(step)
-        print("\n" + msg, end="\n")
+        #msg = "Grabbed Variables at Step " + str(step)
+        #print("\n" + msg, end="\n")
         fig_index = 0
         for i, v in enumerate(grabbed_vals):
             if names: print("   " + names[i] + " = ", end="\n")
             if type(v) == np.ndarray and len(v.shape) > 1: # If v is a matrix, use hinton plotting
-                TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= names[i]+ ' at step '+ str(step))
+                TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= names[i])
                 fig_index += 1
             else:
                 print(v, end="\n\n")
@@ -331,7 +333,7 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, grabvars=None, dendrograms=None, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False, keeps = 1.0):
+def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None, dendrocases=10, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0):
     CL = case_loader.CaseLoader()
     epochs, nbits, num, layers, lrate, mbs = get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs)
     
@@ -351,39 +353,73 @@ def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, gra
     x_len, y_len = len(cman.get_validation_cases()[0][0]), len(cman.get_validation_cases()[0][1])
     layers.insert(0, x_len)
     layers.append(y_len)
-    ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,showint=showint,mbs=mbs,vint=vint,softmax=sm, keeps=keeps)
-    ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
-    ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
+    ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,showint=showint,mbs=mbs,vint=vint,activation_out=activation_out, keeps=keeps)
 
-    if grabvars:
-        for i in range(len(grabvars)):
-            ann.add_grabvar(grabvars[i])
+    #ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
+    #ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
+
     ann.run(epochs)
     #ann.test_on_trains(ann.current_session)
     #ann.do_testing(ann.current_session,cman.get_testing_cases(),'Final Testing')
+    if grabvars:
+        for i in range(len(grabvars)):
+            ann.add_grabvar(grabvars[i])
+    if biasvars:
+        for i in range(len(biasvars)):
+            ann.add_grabvar(biasvars[i], 'bias')
+    if(len(ann.grabvars)>0):
+        ann.reopen_current_session()
+        vals = []
+        #inputs = [cman.get_training_cases[0][0]]; targets = [cman.get_training_cases[1]]
+        #feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+        #results = ann.current_session.run(reann.grabvars, feed_dict=feeder)
+        for var in ann.grabvars:
+            if(len(var.shape)==1):
+                vals.append(np.array([ann.current_session.run(var)]))
+            else:
+                vals.append(ann.current_session.run(var))
+        ann.display_grabvars(vals, ann.grabvars)
+            
     if mapvars:
-        do_mapping(mapvars,cases=cman.get_training_cases()[:mapcases+1], ann=ann)
-    if dendrograms:
-        pass
+        do_mapping(mapvars,cases=cman.get_training_cases()[:mapcases], ann=ann)
+    if dendrovars:
+        do_dendro(dendrovars, cases=cman.get_training_cases()[:dendrocases], ann=ann)
     #ann.runmore(epochs*2)
     return ann
+
+def do_dendro(dendrovars, cases=None, ann=None):
+    for i in dendrovars: # Add all mapvars (to be displayed in own matplotlib window).
+        ann.add_grabvar(i,'out')
+    ann.reopen_current_session()
+    index = 1
+    inputs = [c[0] for c in cases]; targets = [c[1] for c in cases]
+    strings = [TFT.bits_to_str(c) for c in inputs]
+    feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+    results = ann.current_session.run(ann.grabvars, feed_dict=feeder)
+    if(len(dendrovars) > 1):
+        for i in dendrovars:
+            TFT.dendrogram(results[i], strings)
+    else:
+        TFT.dendrogram(results[0], strings)
 
 def do_mapping(mapvars, cases=None, ann=None):
     for i in mapvars: # Add all mapvars (to be displayed in own matplotlib window).
         if i==0:
             ann.add_grabvar(i, 'in')
         ann.add_grabvar(i,'out')
-    print(ann.grabvars)
     ann.reopen_current_session()
     index = 1
-    for case in cases:
-        inputs = [case[0]]; targets = [case[1]]
-        feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
-        results = ann.current_session.run(ann.grabvars, feed_dict=feeder)
-        #for i in range(len(ann.grabvars)):
-        ann.display_mapvars(results, ann.grabvars, case=index)
+    for var in ann.grabvars:
+        results = []
+        for case in cases:
+            inputs = [case[0]]; targets = [case[1]]
+            feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+            results.append(ann.current_session.run(var, feed_dict=feeder))
+            #for i in range(len(ann.grabvars)):
+        #ann.display_mapvars(results, var, case=index)
         index+=1
-    #ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
+        #ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
+        TFT.hinton_plot_multi(results)
      
 
 def get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs):

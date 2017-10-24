@@ -330,8 +330,8 @@ def simple_scatter_plot(points,alpha=0.5,radius=3):
 
 def hinton_plot(matrix, maxval=None, maxsize=1, fig=None,trans=True,scale=True, title='Hinton plot',
                 colors=['gray','red','blue','white']):
-    #hfig = fig if fig else PLT.figure()
-    hfig = PLT.figure()
+    hfig = fig if fig else PLT.figure()
+    #hfig = PLT.figure()
     hfig.suptitle(title,fontsize=18)
     if trans: matrix = matrix.transpose()
     if maxval == None: maxval = np.abs(matrix).max()
@@ -354,6 +354,17 @@ def hinton_plot(matrix, maxval=None, maxsize=1, fig=None,trans=True,scale=True, 
     axes.autoscale_view()
     PLT.draw()
     PLT.pause(.001)
+
+def hinton_plot_multi(data):
+    print(data[0])
+    fig = PLT.figure()
+    def onclick(event):
+        global current
+        current = (current+1)%len(matrixes)
+        hinton_plot(data[current], fig=fig, title='case '+current)
+    fig.canvas.mpl_connect('button_press_event', onclick)
+    hinton_plot(data[0], fig=fig, title='case 0')
+
 
 # This graphically displays a matrix with color codes for positive, negative, small positive and small negative,
 # with the latter 2 defined by the 'cutoff' argument.  The transpose (trans) arg defaults to
