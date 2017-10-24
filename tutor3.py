@@ -50,8 +50,8 @@ class Gann():
         self.input = tf.placeholder(tf.float64, shape=(None, num_inputs), name='Input')
         invar = self.input; insize = num_inputs
         # Build all of the modules
-        for i,outsize in enumerate(self.layer_sizes[1:len(self.layer_sizes)-1]):
-            gmod = Gannmodule(self,i,invar,insize,outsize, self.activation_function, self.keeps)
+        for i in range(1,len(self.layer_sizes)-1):
+            gmod = Gannmodule(self,i,invar,insize,self.layer_sizes[i], self.activation_function, self.keeps)
             invar = gmod.output; insize = gmod.outsize
         gmod = Gannmodule(self,len(self.layer_sizes)-1,invar,insize,self.layer_sizes[-1], None, self.keeps)
         self.out_logits = gmod.out_logits
@@ -65,7 +65,7 @@ class Gann():
     # of the weight array.
 
     def configure_learning(self):
-        self.error = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=self.out_logits),name='RM')
+        self.error = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=self.out_logits),name='Error')
         self.predictor = self.output  # Simple prediction runs will request the value of output neurons
         correct_prediction = tf.equal(tf.argmax(self.output, 1), tf.argmax(self.target, 1))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float64))
@@ -110,9 +110,10 @@ class Gann():
             _,grabvals,_ = self.run_one_step([self.trainer],gvars,self.probes,session=sess,
                                          feed_dict=feeder,step=step,show_interval=self.show_interval)
             error += grabvals[0]
-            if (i%50 == 0):
-                self.error_history.append((step, error/50))
+            if (i%500 == 0):
+                self.error_history.append((step, error/500))
                 self.validation_testing(step,sess)
+                error=0
         self.global_training_step += epochs
         TFT.plot_training_history(self.error_history,self.validation_history,xtitle="Epoch",ytitle="Error",
                                   title="",fig=not(continued))
@@ -131,8 +132,8 @@ class Gann():
         error, grabvals, _ = self.run_one_step(self.error, self.grabvars, self.probes, session=sess,
                                            feed_dict=feeder,  show_interval=None)
 ##        print('%s Set Error = %f ' % (msg, error))
-        if (msg == 'Final Testing'):
-            print ("Final test accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
+        if (msg == 'Final Testing' or msg=='Total Training'):
+            print (msg+" accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
         return error  # self.error uses MSE, so this is a per-case value
 
 
@@ -148,11 +149,12 @@ class Gann():
             self.do_testing(sess,cases,msg='Final Testing')
 
     def validation_testing(self,epoch,sess):
-        cases = self.caseman.get_validation_cases()
+       # cases = self.caseman.get_validation_cases()
+        cases = self.caseman.get_training_cases()
         if len(cases) > 0:
             error = self.do_testing(sess,cases,msg='Validation Testing')
             self.validation_history.append((epoch,error))
-            print ("Step %04d" %epoch, "validation accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
+            print ("Step %04d" %epoch, "training set accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
 
 
     # Do testing (i.e. calc error without learning) on the training set.
@@ -175,15 +177,16 @@ class Gann():
 
     def display_grabvars(self, grabbed_vals, grabbed_vars,step=1):
         names = [x.name for x in grabbed_vars];
-##        msg = "Grabbed Variables at Step " + str(step)
-##        print("\n" + msg, end="\n")
+        msg = "Grabbed Variables at Step " + str(step)
+        print("\n" + msg, end="\n")
         fig_index = 0
         for i, v in enumerate(grabbed_vals):
-##            if names: print("   " + names[i] + " = ", end="\n")
+            if names: print("   " + names[i] + " = ", end="\n")
             if type(v) == np.ndarray and len(v.shape) > 1: # If v is a matrix, use hinton plotting
                 TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= names[i]+ ' at step '+ str(step))
                 fig_index += 1
-##                print(v, end="\n\n")
+            else:
+                print(v, end="\n\n")
 
     def run(self,epochs=100,sess=None,continued=False):
         PLT.ion()
@@ -315,7 +318,7 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(case, activation_function = tf.nn.relu, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False, keeps = 1.0):
+def autoex(case, activation_function = tf.nn.relu, mapping=False, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None, lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,sm=False, keeps = 1.0):
     CL = case_loader.CaseLoader()
     epochs, nbits, num, layers, lrate, mbs = get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs)
     
@@ -336,12 +339,26 @@ def autoex(case, activation_function = tf.nn.relu, epochs=None, nbits=None, num 
     layers.insert(0, x_len)
     layers.append(y_len)
     ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,showint=showint,mbs=mbs,vint=vint,softmax=sm, keeps=keeps)
-##    ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
-##    ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
-    #ann.add_grabvar(0,'wgt') # Add a grabvar (to be displayed in its own matplotlib window).
+    ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
+    ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
     ann.run(epochs)
+    #ann.test_on_trains(ann.current_session)
+    #ann.do_testing(ann.current_session,cman.get_testing_cases(),'Final Testing')
+    if mapping:
+        do_mapping(cases=cman.get_training_cases(), ann=ann)
     #ann.runmore(epochs*2)
     return ann
+
+def do_mapping(cases=None, ann=None):
+    for i in range(len(ann.modules)): # Add all grabvars (to be displayed in its own matplotlib window).
+        ann.add_grabvar(i,'wgt')
+    ann.reopen_current_session()
+
+    inputs = [c[0] for c in cases]; targets = [c[1] for c in cases]
+    feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
+    
+    ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
+     
 
 def get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs):
     epochs_, nbits_, num_, layers_, lrate_, mbs_ = CL.get_fav_specs(case)
