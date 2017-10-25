@@ -11,25 +11,25 @@ import random as r
 
 class Gann():
 
-    def __init__(self, loss_func, init_weight_range, mbs, epochs, dims, cman, activation_function, activation_out=tf.nn.softmax, lrate=.1,showint=None,mbs=10,vint=None,softmax=False, keeps = 1.0):
+    def __init__(self, loss_func, init_weight_range, dims, cman, activation_function, activation_out=tf.nn.softmax, limit=0.95, lrate=.1,mbs=10,softmax=False, keeps = 1.0, showint=100):
         self.learning_rate = lrate
         self.activation_function = activation_function
         self.activation_out = activation_out
         self.layer_sizes = dims # Sizes of each layer of neurons
-        self.show_interval = showint # Frequency of showing grabbed variables
         self.global_training_step = 0 # Enables coherent data-storage during extra training runs (see runmore).
         self.grabvars = []  # Variables to be monitored (by gann code) during a run.
         self.grabvar_figures = [] # One matplotlib figure for each grabvar
         self.minibatch_size = mbs
-        self.validation_interval = vint
         self.validation_history = []
         self.keeps = keeps
+        self.t_limit = limit
+        self.fin = False
         self.loss_func = loss_func
         self.init_weight_range = init_weight_range
-        self.epochs = epochs
         self.caseman = cman
         self.activation_output = activation_out
         self.modules = []
+        self.show_interval = showint
         self.build()
 
 
@@ -112,8 +112,9 @@ class Gann():
         if not(continued): self.error_history = []
         val_cases = self.caseman.get_validation_cases()
         x_val = [c[0] for c in val_cases]; y_val = [c[1] for c in val_cases]
-        for i in range(epochs+1):
-            error = 0; step = self.global_training_step + i
+        error = 0
+        for i in range(1,epochs+1):
+            step = self.global_training_step + i
             gvars = [self.error] + self.grabvars
             mbs = self.minibatch_size; ncases = len(cases)
             inputs, targets = self.next_batch(cases, mbs)
@@ -121,10 +122,12 @@ class Gann():
             _,grabvals,_ = self.run_one_step([self.trainer],gvars,self.probes,session=sess,
                                          feed_dict=feeder,step=step,show_interval=self.show_interval)
             error += grabvals[0]
-            if (i%self.mbs == 0):
-                self.error_history.append((step, error/self.mbs))
+            if (i%mbs == 0):
+                self.error_history.append((step, error/mbs))
                 self.validation_testing(step,sess)
                 error=0
+            if(self.fin):
+                break
         self.global_training_step += epochs
         TFT.plot_training_history(self.error_history,self.validation_history,xtitle="Epoch",ytitle="Error",
                                   title="",fig=not(continued))
@@ -144,8 +147,10 @@ class Gann():
                                            feed_dict=feeder,  show_interval=None)
 ##        print('%s Set Error = %f ' % (msg, error))
         if (msg == 'Final Testing' or msg=='Total Training'):
-            print (msg+" accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
-        return error  # self.error uses MSE, so this is a per-case value
+            t_acc = sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1})
+            print (msg+" accuracy = %g" %t_acc)
+        return error
+        # self.error uses MSE, so this is a per-case value
 
 
     def training_session(self,epochs,sess=None,dir="probeview",continued=False):
@@ -160,13 +165,15 @@ class Gann():
             self.do_testing(sess,cases,msg='Final Testing')
 
     def validation_testing(self,epoch,sess):
-        #cases = self.caseman.get_validation_cases()
-        cases = self.caseman.get_training_cases()
+        cases = self.caseman.get_validation_cases()
+        t_cases = self.caseman.get_training_cases()
         if len(cases) > 0:
             error = self.do_testing(sess,cases,msg='Validation Testing')
             self.validation_history.append((epoch,error))
-            print ("Step %04d" %epoch, "validation set accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
-
+            t_acc = sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in t_cases], self.target: [c[1] for c in t_cases], self.keep_prob: 1})
+            print ("Step %04d" %epoch, "training set accuracy = %g" %t_acc)
+            if(t_acc>self.t_limit):
+                self.fin = True
 
     # Do testing (i.e. calc error without learning) on the training set.
     def test_on_trains(self,sess):
@@ -262,9 +269,9 @@ class Gann():
         session = sess if sess else self.current_session
         self.state_saver.restore(session, spath)
 
-    def close_current_session(self):
+    def close_current_session(self, view=True):
         self.save_session_params(sess=self.current_session)
-        TFT.close_session(self.current_session, view=True)
+        TFT.close_session(self.current_session, view)
 
 
 # A general ann module = a layer of neurons (the output) plus its incoming weights and biases.
@@ -353,13 +360,14 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None,
-           dendrocases=10, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None,
-           lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0, probevars=None):
+def autoex(filename, minbit=0, maxbit=8, showint=100, dendrocases=10):
+
+# activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None,
+##           dendrocases=10, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None,
+##           lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0, probevars=None
     
     CL = case_loader.CaseLoader()
-    layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, cfrac, vfrac, tfrac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases = set_specs(CL.get_specs_from_file())
-    
+    layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, cfrac, vfrac, tfrac, mbs, mapcases, epochs, mapvars, dendrovars, grabvars, biasvars, t_limit = set_specs(CL.get_specs_from_file(filename))
     switcher = {
         "parity": (lambda : CL.parity(nbits)),
         "wine": (lambda : CL.wine()),
@@ -379,12 +387,12 @@ def autoex(activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=
     layers.append(y_len)
     ann = Gann(loss_func = loss_func, init_weight_range=init_weight_range, mbs = mbs,
                dims=layers,cman=cman, activation_function = hidden_act_func, lrate=lrate,
-               showint=showint,mbs=mbs,vint=vint,activation_out=out_act_func, keeps=keeps)
+               activation_out=out_act_func, keeps=1, limit=t_limit)
 
     
-    if not probevars:
-        ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
-        #ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
+    for i in range(len(ann.modules)):
+        ann.gen_probe(i,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module i.
+        ann.gen_probe(i,'out',('avg','max'))  # Plot average and max value of module i's output vector
 
     ann.run(epochs)
     #ann.test_on_trains(ann.current_session)
@@ -411,9 +419,17 @@ def autoex(activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=
 
 
     if mapvars:
-        do_mapping(mapvars,cases=cman.get_training_cases()[:mapcases], ann=ann)
+        if(case=="autoencoder"):
+            do_mapping(mapvars, cases=TFT.gen_all_one_hot_cases(8)[:8], ann=ann)
+        else:
+            do_mapping(mapvars,cases=cman.get_training_cases()[:mapcases], ann=ann)
     if dendrovars:
-        do_dendro(dendrovars, cases=cman.get_training_cases()[:dendrocases], ann=ann)
+        if(case=="autoencoder"):
+            do_dendro(dendrovars, cases=TFT.gen_all_one_hot_cases(8)[:8], ann=ann)
+        else:
+            do_dendro(dendrovars, cases=cman.get_training_cases()[:dendrocases], ann=ann)
+    #ann.reopen_current_session()
+    #ann.close_current_session(ann.current_session, view=True)
     return ann
 
 def do_dendro(dendrovars, cases=None, ann=None):
@@ -437,10 +453,9 @@ def do_mapping(mapvars, cases=None, ann=None):
         if i==0:
             ann.add_grabvar(i, 'in')
         ann.add_grabvar(i,'out')
-        if i==len(mapvars)-1:
+        if i==len(ann.modules)-2:
             ann.add_grabvar(len(ann.modules)-1, 'out')
 
-    print(ann.grabvars)
     ann.reopen_current_session()
     index = 1
     inputs = [c[0] for c in cases]; targets = [c[1] for c in cases]
@@ -479,7 +494,11 @@ def set_specs(specs):
     dendro_layers = to_list(int, specs, 16)
     weights = to_list(int, specs, 17)
     biases = to_list(int, specs, 18)
-    return layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac, test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases
+    if(specs[19]):
+        t_limit = float(specs[19])
+    else:
+        t_limit = 0.95
+    return layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac, test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases, t_limit
     
 def to_list(typ, specs, pos):
     if (not specs[pos]):
