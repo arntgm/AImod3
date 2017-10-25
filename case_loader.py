@@ -4,7 +4,7 @@ import tflowtools as TFT
 class CaseLoader():
     
     def __init__(self):
-        self.filepath = "C:/Users/agmal_000/Skole/AI prog/Oppgave 2/cases/"
+        self.filepath = "C:/Users/Bendik/Documents/GitHub/cases/"
 
     def parity(self, bits):
         self.cases = TFT.gen_all_parity_cases(bits)
@@ -91,21 +91,24 @@ class CaseLoader():
         #GOOD
         if case == "mnist":
             return 2000, 0, 0, [200,100,60,30], 0.005, 100
-        if case == "yeast":
-            return 30000, 0, 0, [100,100,100,100], 0.001, 100
-        if case == "wine":
-            return 10000, 0, 0, [400,300,200,100,50], 0.001, 100
+        if case == "yeast": #use softplus
+            return 20000, 0, 0, [40, 200, 40], 0.05, 300 #200, 100, 20
+        if case == "wine": #use softplus
+            return 10000, 0, 0, [400,200], 0.005, 100
         #GOOD, bruk tf.nn.tanh
         if case == "parity":
-            return 6000, 0, 0, [10,10,10], 0.005, 500
+            #return 6000, 0, 0, [10,10,10], 0.005, 500
+            return 6000, 0, 0, [40], 0.005, 500
+        if case == "autoencoder":
+            return 1500, 0, 0, [3], 0.005, 200
         #GOOD
         if case == "bitcount":
             return 3000, 16, 2**12, [32], 0.005, 100
-        if case == "glass":
-            return 5000, 0, 0, [36,300,150, 100, 50, 20, 10], 0.005, 200
+        if case == "glass": #use elu
+            return 14000, 0, 0, [20,10,10], 0.005, 100
         #GOOD
         if case == "phishing":
-            return 5000, 0, 0, [30, 20,15,10,5], 0.005, 100
+            return 1000, 0, 0, [30, 20,15,10,5], 0.005, 100 #5000 epochs
         #GOOD
         if case == "segmentcount":
             return 5000, 25, 2**12, [150,100,50,25,10], 0.005, 100
