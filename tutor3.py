@@ -36,7 +36,7 @@ class Gann():
     # grabvar gets its own matplotlib figure in which to display its value.
     def add_grabvar(self,module_index,type='wgt'):
         self.grabvars.append(self.modules[module_index].getvar(type))
-        self.grabvar_figures.append(PLT.figure())
+        #self.grabvar_figures.append(PLT.figure())
 
     def roundup_probes(self):
         self.probes = tf.summary.merge_all()
@@ -150,12 +150,12 @@ class Gann():
             self.do_testing(sess,cases,msg='Final Testing')
 
     def validation_testing(self,epoch,sess):
-       # cases = self.caseman.get_validation_cases()
+        #cases = self.caseman.get_validation_cases()
         cases = self.caseman.get_training_cases()
         if len(cases) > 0:
             error = self.do_testing(sess,cases,msg='Validation Testing')
             self.validation_history.append((epoch,error))
-            print ("Step %04d" %epoch, "training set accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
+            print ("Step %04d" %epoch, "validation set accuracy = %g" %sess.run(self.accuracy, feed_dict={self.input: [c[0] for c in cases], self.target: [c[1] for c in cases], self.keep_prob: 1}))
 
 
     # Do testing (i.e. calc error without learning) on the training set.
@@ -177,7 +177,7 @@ class Gann():
             pass
         return results[0], results[1], sess
 
-    def display_grabvars(self, grabbed_vals, grabbed_vars):
+    def display_grabvars(self, grabbed_vals, grabbed_vars, new=False):
         names = [x.name for x in grabbed_vars];
         #msg = "Grabbed Variables at Step " + str(step)
         #print("\n" + msg, end="\n")
@@ -185,7 +185,11 @@ class Gann():
         for i, v in enumerate(grabbed_vals):
             if names: print("   " + names[i] + " = ", end="\n")
             if type(v) == np.ndarray and len(v.shape) > 1: # If v is a matrix, use hinton plotting
-                TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= names[i])
+                title= names[i]
+                if(new):
+                    TFT.hinton_plot(v,title=title)
+                else:
+                    TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title=title)
                 fig_index += 1
             else:
                 print(v, end="\n\n")
@@ -198,7 +202,9 @@ class Gann():
         for i, v in enumerate(grabbed_vals):
             if names: print("   " + names[i] + " = ", end="\n")
             if type(v) == np.ndarray and len(v.shape) > 1: # If v is a matrix, use hinton plotting
-                TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= 'layer ' +names[i]+ ' for case '+ str(case))
+                #TFT.hinton_plot(v,fig=self.grabvar_figures[fig_index],title= 'layer ' +names[i]+ ' for case '+ str(case))
+                TFT.hinton_plot(v,title= 'layer ' +names[i]+ ' for case '+ str(case))
+
                 fig_index += 1
             else:
                 print(v, end="\n\n")
@@ -333,12 +339,13 @@ class Caseman():
 
 # After running this, open a Tensorboard (Go to localhost:6006 in your Chrome Browser) and check the
 # 'scalar', 'distribution' and 'histogram' menu options to view the probed variables.
-def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None,
+def autoex(activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=None, grabvars=None, dendrovars=None,
            dendrocases=10, epochs=None, nbits=None, num = None, minbit = 0, maxbit = 8, layers = None,
-           lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0):
+           lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0, probevars=None):
     
     CL = case_loader.CaseLoader()
-    epochs, nbits, num, layers, lrate, mbs = get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs)
+    layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac,
+    test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases = set_specs(CL.get_specs_from_file())
     
     switcher = {
         "parity": (lambda : CL.parity(nbits)),
@@ -360,8 +367,10 @@ def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, bia
     ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,
                showint=showint,mbs=mbs,vint=vint,activation_out=activation_out, keeps=keeps)
 
-    #ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
-    #ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
+    
+    if not probevars:
+        ann.gen_probe(0,'wgt',('hist','avg'))  # Plot a histogram and avg of the incoming weights to module 0.
+        #ann.gen_probe(1,'out',('avg','max'))  # Plot average and max value of module 1's output vector
 
     ann.run(epochs)
     #ann.test_on_trains(ann.current_session)
@@ -383,13 +392,14 @@ def autoex(case, activation_function = tf.nn.relu, mapvars=None, mapcases=2, bia
                 vals.append(np.array([ann.current_session.run(var)]))
             else:
                 vals.append(ann.current_session.run(var))
-        ann.display_grabvars(vals, ann.grabvars)
-            
+        ann.display_grabvars(vals, ann.grabvars, new=True)
+
+
+
     if mapvars:
         do_mapping(mapvars,cases=cman.get_training_cases()[:mapcases], ann=ann)
     if dendrovars:
         do_dendro(dendrovars, cases=cman.get_training_cases()[:dendrocases], ann=ann)
-    #ann.runmore(epochs*2)
     return ann
 
 def do_dendro(dendrovars, cases=None, ann=None):
@@ -408,50 +418,64 @@ def do_dendro(dendrovars, cases=None, ann=None):
         TFT.dendrogram(results[0], strings)
 
 def do_mapping(mapvars, cases=None, ann=None):
+    ann.grabvars=[]
     for i in mapvars: # Add all mapvars (to be displayed in own matplotlib window).
         if i==0:
             ann.add_grabvar(i, 'in')
         ann.add_grabvar(i,'out')
         if i==len(mapvars)-1:
             ann.add_grabvar(len(ann.modules)-1, 'out')
-        
+
+    print(ann.grabvars)
     ann.reopen_current_session()
     index = 1
     inputs = [c[0] for c in cases]; targets = [c[1] for c in cases]
     feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
     results = (ann.current_session.run(ann.grabvars, feed_dict=feeder))
-    print(results)
-    index=1
+    index=0
     for res in results:
-        title = "layer "+str(index)
-        index+=1
+        title = "layer "+str(index)+" case mapping"
+##         TFT.hinton_plot(res, title=title, fig=ann.grabvar_figures[index])
         TFT.hinton_plot(res, title=title)
-##    for var in ann.grabvars:
-##        results = []
-##        for case in cases:
-##            inputs = [case[0]]; targets = [case[1]]
-##            feeder = {ann.input: inputs, ann.target: targets, ann.keep_prob: ann.keeps}
-##            results.append(ann.current_session.run(var, feed_dict=feeder))
-##            #for i in range(len(ann.grabvars)):
-##        #ann.display_mapvars(results, var, case=index)
-##        index+=1
-##        #ann.run_one_step(ann.accuracy, ann.grabvars, session=ann.current_session, feed_dict=feeder)
-##        TFT.hinton_plot_multi(results)
+
+        index+=1
      
 
-def get_specs(CL, case, epochs, nbits, num, layers, lrate, mbs):
-    epochs_, nbits_, num_, layers_, lrate_, mbs_ = CL.get_fav_specs(case)
-    if (layers == None):
-        layers = layers_
-    if (epochs == None):
-        epochs = epochs_
-    if (nbits == None):
-        nbits = nbits_
-    if (num == None):
-        num = num_
-    if (lrate == None):
-        lrate = lrate_
-    if (mbs == None):
-        mbs = mbs_
-    return epochs, nbits, num, layers, lrate, mbs
+def set_specs(specs):
+    functions = {"tf.nn.relu": tf.nn.relu, "tf.nn.elu": tf.nn.elu, "tf.nn.tanh": tf.nn.tanh, "tf.nn.softmax": tf.nn.softmax, "tf.nn.relu6": tf.nn.relu6,
+                 "tf.nn.crelu": tf.nn.crelu, "tf.nn.softplus": tf.nn.softplus, "tf.nn.softsign": tf.nn.softsign, "tf.nn.dropout": tf.nn.dropout,
+                 "tf.nn.bias_add": tf.nn.bias_add, "tf.sigmoid": tf.sigmoid, "tf.tanh": tf.tanh,
+                 "tf.nn.softmax_cross_entropy_with_logits": tf.nn.softmax_cross_entropy_with_logits, "cross_entropy": tf.reduce_sum, "tf.reduce.mean": tf.reduce.mean}
+    layers = to_list(int, specs, 0)
+    hidden_act_func = functions[specs[1]]
+    nbits = int(specs[2])
+    num = int(specs[3])
+    out_act_func = functions[specs[4]]
+    loss_func = functions[specs[5]]
+    lrate = float(specs[6])
+    init_weight_range = to_list(float, specs, 7)
+    case = specs[8]
+    case_frac = float(specs[9])
+    val_frac = float(specs[10])
+    test_frac = float(specs[11])
+    mbs = int(specs[12])
+    map_batch_size = int(specs[13])
+    epochs = int(specs[14])
+    map_layers = to_list(int,specs, 15)
+    dendro_layers = to_list(int, specs, 16)
+    weights = to_list(int, specs, 17)
+    biases = to_list(int, specs, 18)
+    return (layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac,
+            test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases)
+    
+def to_list(typ, specs, pos):
+    if (not specs[pos]):
+        return None
+    layers_ = specs[pos].split(",")
+    layers = []
+    for layer in layers_:
+        layers.append(typ(layer))
+    return layers
+
+
     
