@@ -115,8 +115,8 @@ class CaseLoader():
         else:
             return []
 
-    def get_specs_from_file(self):
-        with open (self.filepath + "specs.txt") as f:
+    def get_specs_from_file(self, filename):
+        with open (self.filepath + filename+ ".txt") as f:
             content = f.readlines()
         content = [x.strip().split(":") for x in content]
         specs = []
