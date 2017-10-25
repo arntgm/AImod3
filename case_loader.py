@@ -92,7 +92,7 @@ class CaseLoader():
         if case == "mnist":
             return 2000, 0, 0, [200,100,60,30], 0.005, 100
         if case == "yeast": #use softplus
-            return 20000, 0, 0, [40, 200, 40], 0.05, 300 #200, 100, 20
+            return 15000, 0, 0, [40, 200, 40], 0.05, 300 #200, 100, 20
         if case == "wine": #use softplus
             return 10000, 0, 0, [400,200], 0.005, 100
         #GOOD, bruk tf.nn.tanh
@@ -114,3 +114,12 @@ class CaseLoader():
             return 5000, 25, 2**12, [150,100,50,25,10], 0.005, 100
         else:
             return []
+
+    def get_specs_from_file(self):
+        with open (self.filepath + "specs.txt") as f:
+            content = f.readlines()
+        content = [x.strip().split(":") for x in content]
+        specs = []
+        for c in content:
+            specs.append(c[1].strip())
+        return specs
