@@ -11,9 +11,10 @@ import random as r
 
 class Gann():
 
-    def __init__(self, dims, cman, activation_function, activation_out=tf.nn.softmax, lrate=.1,showint=None,mbs=10,vint=None,softmax=False, keeps = 1.0):
+    def __init__(self, loss_func, init_weight_range, mbs, epochs, dims, cman, activation_function, activation_out=tf.nn.softmax, lrate=.1,showint=None,mbs=10,vint=None,softmax=False, keeps = 1.0):
         self.learning_rate = lrate
         self.activation_function = activation_function
+        self.activation_out = activation_out
         self.layer_sizes = dims # Sizes of each layer of neurons
         self.show_interval = showint # Frequency of showing grabbed variables
         self.global_training_step = 0 # Enables coherent data-storage during extra training runs (see runmore).
@@ -23,10 +24,14 @@ class Gann():
         self.validation_interval = vint
         self.validation_history = []
         self.keeps = keeps
+        self.loss_func = loss_func
+        self.init_weight_range = init_weight_range
+        self.epochs = epochs
         self.caseman = cman
         self.activation_output = activation_out
         self.modules = []
         self.build()
+
 
     # Probed variables are to be displayed in the Tensorboard.
     def gen_probe(self, module_index, type, spec):
@@ -51,9 +56,9 @@ class Gann():
         invar = self.input; insize = num_inputs
         # Build all of the modules
         for i in range(1,len(self.layer_sizes)-1):
-            gmod = Gannmodule(self,i,invar,insize,self.layer_sizes[i], self.activation_function, self.keeps)
+            gmod = Gannmodule(self,i,invar,insize,self.layer_sizes[i], self.activation_function, self.keeps, self.init_weight_range)
             invar = gmod.output; insize = gmod.outsize
-        gmod = Gannmodule(self,len(self.layer_sizes)-1,invar,insize,self.layer_sizes[-1], None, self.keeps)
+        gmod = Gannmodule(self,len(self.layer_sizes)-1,invar,insize,self.layer_sizes[-1], None, self.keeps, self.init_weight_range)
         self.out_logits = gmod.out_logits
         self.output = gmod.output # Output of last module is output of whole network
         #if self.softmax_outputs: self.output = tf.nn.softmax(self.output)
@@ -66,7 +71,12 @@ class Gann():
     # of the weight array.
 
     def configure_learning(self):
-        self.error = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=self.out_logits),name='Error')
+        if (self.loss_func == tf.nn.softmax_cross_entropy_with_logits):
+            self.error = tf.reduce_mean(tf.nn.softmax_cross_entropy_with_logits(labels=self.target, logits=self.out_logits),name='Error')
+        elif (self.loss_func == tf.reduce_sum):
+            self.error = -tf.reduce_sum(self.target * tf.log(self.out_logits), name = 'Error')
+        elif (self.loss_func == tf.reduce_mean):
+            self.error = tf.reduce_mean(tf.square(self.target - self.out_logits),name='Error')
         self.predictor = self.output  # Simple prediction runs will request the value of output neurons
         correct_prediction = tf.equal(tf.argmax(self.output, 1), tf.argmax(self.target, 1))
         self.accuracy = tf.reduce_mean(tf.cast(correct_prediction, tf.float64))
@@ -111,8 +121,8 @@ class Gann():
             _,grabvals,_ = self.run_one_step([self.trainer],gvars,self.probes,session=sess,
                                          feed_dict=feeder,step=step,show_interval=self.show_interval)
             error += grabvals[0]
-            if (i%500 == 0):
-                self.error_history.append((step, error/500))
+            if (i%self.mbs == 0):
+                self.error_history.append((step, error/self.mbs))
                 self.validation_testing(step,sess)
                 error=0
         self.global_training_step += epochs
@@ -260,7 +270,7 @@ class Gann():
 # A general ann module = a layer of neurons (the output) plus its incoming weights and biases.
 class Gannmodule():
 
-    def __init__(self,ann,index,invariable,insize,outsize, activation_function, keep_prob):
+    def __init__(self,ann,index,invariable,insize,outsize, activation_function, keep_prob, init_weight_range):
         self.ann = ann
         self.insize=insize  # Number of neurons feeding into this module
         self.outsize=outsize # Number of neurons in this module
@@ -268,13 +278,14 @@ class Gannmodule():
         self.index = index
         self.keep_prob = keep_prob
         self.name = "Module-"+str(self.index)
+        self.init_weight_range = init_weight_range
         self.build(activation_function)
 
     def build(self, activation_function):
         mona = self.name; n = self.outsize
-        self.weights = tf.Variable(np.random.uniform(-.1, .1, size=(self.insize,n)),
+        self.weights = tf.Variable(np.random.uniform(self.init_weight_range[0], self.init_weight_range[1], size=(self.insize,n)),
                                    name=mona+'-wgt',trainable=True) # True = default for trainable anyway
-        self.biases = tf.Variable(np.random.uniform(-.1, .1, size=n),
+        self.biases = tf.Variable(np.random.uniform(self.init_weight_range[0], self.init_weight_range[1], size=n),
                                   name=mona+'-bias', trainable=True)  # First bias vector
         self.out_logits = tf.matmul(self.input,self.weights)+self.biases
         self.out_logits = tf.nn.dropout(self.out_logits, self.keep_prob)
@@ -310,8 +321,9 @@ class Gannmodule():
 
 class Caseman():
 
-    def __init__(self,cfunc,vfrac=0,tfrac=0):
+    def __init__(self,cfunc,cfrac=1,vfrac=0,tfrac=0):
         self.casefunc = cfunc
+        self.case_fraction = cfrac
         self.validation_fraction = vfrac
         self.test_fraction = tfrac
         self.training_fraction = 1 - (vfrac + tfrac)
@@ -324,11 +336,13 @@ class Caseman():
     def organize_cases(self):
         ca = np.array(self.cases)
         np.random.shuffle(ca) # Randomly shuffle all cases
-        separator1 = round(len(self.cases) * self.training_fraction)
-        separator2 = separator1 + round(len(self.cases)*self.validation_fraction)
-        self.training_cases = ca[0:separator1]
-        self.validation_cases = ca[separator1:separator2]
-        self.testing_cases = ca[separator2:]
+        separator0 = round(len(self.cases) * self.case_fraction)
+        self.case = ca[0:separator0]
+        separator1 = round(len(self.case) * self.training_fraction)
+        separator2 = separator1 + round(len(self.case)*self.validation_fraction)
+        self.training_cases = self.case[0:separator1]
+        self.validation_cases = self.case[separator1:separator2]
+        self.testing_cases = self.case[separator2:]
 
     def get_training_cases(self): return self.training_cases
     def get_validation_cases(self): return self.validation_cases
@@ -344,8 +358,7 @@ def autoex(activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=
            lrate=None,showint=100,mbs=None,vfrac=0.1,tfrac=0.1,vint=100,activation_out=tf.nn.softmax, keeps = 1.0, probevars=None):
     
     CL = case_loader.CaseLoader()
-    layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac,
-    test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases = set_specs(CL.get_specs_from_file())
+    layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, cfrac, vfrac, tfrac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases = set_specs(CL.get_specs_from_file())
     
     switcher = {
         "parity": (lambda : CL.parity(nbits)),
@@ -360,12 +373,13 @@ def autoex(activation_function = tf.nn.relu, mapvars=None, mapcases=2, biasvars=
     }
     
     case_generator = switcher.get(case, "nothing")
-    cman = Caseman(cfunc=case_generator,vfrac=vfrac,tfrac=tfrac)
-    x_len, y_len = len(cman.get_validation_cases()[0][0]), len(cman.get_validation_cases()[0][1])
+    cman = Caseman(cfunc=case_generator,cfrac=cfrac,vfrac=vfrac,tfrac=tfrac)
+    x_len, y_len = len(cman.get_training_cases()[0][0]), len(cman.get_training_cases()[0][1])
     layers.insert(0, x_len)
     layers.append(y_len)
-    ann = Gann(dims=layers,cman=cman, activation_function = activation_function, lrate=lrate,
-               showint=showint,mbs=mbs,vint=vint,activation_out=activation_out, keeps=keeps)
+    ann = Gann(loss_func = loss_func, init_weight_range=init_weight_range, mbs = mbs,
+               dims=layers,cman=cman, activation_function = hidden_act_func, lrate=lrate,
+               showint=showint,mbs=mbs,vint=vint,activation_out=out_act_func, keeps=keeps)
 
     
     if not probevars:
@@ -445,7 +459,7 @@ def set_specs(specs):
     functions = {"tf.nn.relu": tf.nn.relu, "tf.nn.elu": tf.nn.elu, "tf.nn.tanh": tf.nn.tanh, "tf.nn.softmax": tf.nn.softmax, "tf.nn.relu6": tf.nn.relu6,
                  "tf.nn.crelu": tf.nn.crelu, "tf.nn.softplus": tf.nn.softplus, "tf.nn.softsign": tf.nn.softsign, "tf.nn.dropout": tf.nn.dropout,
                  "tf.nn.bias_add": tf.nn.bias_add, "tf.sigmoid": tf.sigmoid, "tf.tanh": tf.tanh,
-                 "tf.nn.softmax_cross_entropy_with_logits": tf.nn.softmax_cross_entropy_with_logits, "cross_entropy": tf.reduce_sum, "tf.reduce.mean": tf.reduce.mean}
+                 "tf.nn.softmax_cross_entropy_with_logits": tf.nn.softmax_cross_entropy_with_logits, "cross_entropy": tf.reduce_sum, "tf.reduce.mean": tf.reduce_mean}
     layers = to_list(int, specs, 0)
     hidden_act_func = functions[specs[1]]
     nbits = int(specs[2])
@@ -465,8 +479,7 @@ def set_specs(specs):
     dendro_layers = to_list(int, specs, 16)
     weights = to_list(int, specs, 17)
     biases = to_list(int, specs, 18)
-    return (layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac,
-            test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases)
+    return layers, hidden_act_func, nbits, num, out_act_func, loss_func, lrate, init_weight_range, case, case_frac, val_frac, test_frac, mbs, map_batch_size, epochs, map_layers, dendro_layers, weights, biases
     
 def to_list(typ, specs, pos):
     if (not specs[pos]):
